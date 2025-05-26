@@ -1,0 +1,5 @@
+commit_dialog_history_messages=<?xml version\="1.0" encoding\="UTF-8"?>\r\n<messages>\r\n<message>commited extra refereeing analysis</message>\r\n<message>commited updated refereeservice</message>\r\n<message>updated changes and comments for files and some maven files</message>\r\n<message>Commited code relating to matches, teams, squads etc</message>\r\n<message>Commited updated code relating to login and reset password</message>\r\n<message>Commited updates for incident report and post functionality</message>\r\n<message>Commited some config and service files</message>\r\n<message>Commited result and fixture changes including deletions</message>\r\n<message>Commited referee related controllers model and services</message>\r\n<message>Commited Team related code including controller,services and repo</message>\r\n</messages>
+eclipse.preferences.version=1
+repositories_view_filters=<?xml version\="1.0" encoding\="UTF-8"?>\r\n<FilterCache/>
+resourcehistory_graph_split=500,500
+resourcehistory_rev_split=700,300

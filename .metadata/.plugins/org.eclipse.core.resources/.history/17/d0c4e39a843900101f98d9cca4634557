@@ -1,0 +1,678 @@
+ package com.example.premierleagueapp.service;
+
+
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import com.example.premierleagueapp.model.Event;
+import com.example.premierleagueapp.model.FixtureStats;
+import com.example.premierleagueapp.model.IncidentReport;
+import com.example.premierleagueapp.model.Lineup;
+import com.example.premierleagueapp.model.Match;
+import com.example.premierleagueapp.model.MatchAnalysis;
+import com.example.premierleagueapp.model.MatchEvent;
+import com.example.premierleagueapp.model.PlayerDTO;
+import com.example.premierleagueapp.model.RefereeAnalysis;
+import com.example.premierleagueapp.model.Result;
+import com.example.premierleagueapp.model.Stat;
+import com.example.premierleagueapp.repository.MatchAnalysisRepository;
+import com.example.premierleagueapp.repository.MatchEventRepository;
+import com.example.premierleagueapp.repository.RefereeAnalysisRepository;
+import com.example.premierleagueapp.repository.ResultRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
+@Service
+public class ResultService {
+
+    private final ResultRepository resultRepository;
+    private final RefereeAnalysisRepository refereeAnalysisRepository;
+    private final MatchAnalysisRepository matchAnalysisRepository;
+    private final MatchEventRepository matchEventRepository;
+
+    public ResultService(ResultRepository resultRepository, RefereeAnalysisRepository refereeAnalysisRepository, MatchAnalysisRepository matchAnalysisRepository, MatchEventRepository matchEventRepository) {
+        this.resultRepository = resultRepository;
+        this.refereeAnalysisRepository = refereeAnalysisRepository; 
+        this.matchAnalysisRepository = matchAnalysisRepository;
+        this.matchEventRepository = matchEventRepository;
+    }
+    
+    
+    //**MATCH DASHBOARD CODE HERE**//
+    //get statistics, match dashboard
+    public List<FixtureStats> getStatsForFixture(int fixtureId) {
+    	//create rest template object to make http requests, 
+        RestTemplate restTemplate = new RestTemplate();
+        //set up http headers for api access
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-rapidapi-key", "1c50bcaccdmsh24da0059f6cea8ap10c332jsn3680464f84d3");
+        headers.set("x-rapidapi-host", "api-football-v1.p.rapidapi.com");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        //construct url
+        String statsUrl = "https://api-football-v1.p.rapidapi.com/v3/fixtures/statistics?fixture=" + fixtureId;
+
+        try {
+        	//make the GET request to API endpoint
+            ResponseEntity<String> response = restTemplate.exchange(statsUrl, HttpMethod.GET, entity, String.class);
+            //Parse response body as JSON
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            
+            List<FixtureStats> statsList = new ArrayList<>();
+
+            if (rootNode != null && rootNode.has("response")) {
+            	//extract the response node if response is not null
+                JsonNode responseNode = rootNode.get("response");
+                //iterate over each team and extract information
+                for (JsonNode statsNode : responseNode) {
+                    JsonNode teamNode = statsNode.get("team");
+                    String teamName = teamNode.has("name") ? teamNode.get("name").asText() : "";
+                    String teamLogo = teamNode.has("logo") ? teamNode.get("logo").asText() : "";
+
+                    List<Stat> statistics = new ArrayList<>();
+                    //extract and parse each individual statistic entry
+                    JsonNode statsArrayNode = statsNode.get("statistics");
+                    if (statsArrayNode != null && statsArrayNode.isArray()) {
+                        for (JsonNode statNode : statsArrayNode) {
+                            String type = statNode.get("type").asText();
+                            JsonNode valueNode = statNode.get("value");
+                            Object value;
+                            if (valueNode.isInt()) {
+                            	value = valueNode.asInt();
+
+                            } else if (valueNode.isTextual()) {
+                            	value = valueNode.asText();
+                            } else {
+                            	value = 0;
+                            }
+                            
+                         statistics.add(new Stat(type, value));
+                        }
+                    }
+
+                    FixtureStats fixtureStats = new FixtureStats(teamName, teamLogo, statistics);
+                    statsList.add(fixtureStats);
+                }
+            }
+
+            return statsList;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return Collections.emptyList();
+        }
+    }
+    
+    //get lineups, match dashboard functionality
+    public List<Lineup> getLineupsForFixture(int fixtureId) {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-rapidapi-key", "1c50bcaccdmsh24da0059f6cea8ap10c332jsn3680464f84d3");
+        headers.set("x-rapidapi-host", "api-football-v1.p.rapidapi.com");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        String lineupsUrl = "https://api-football-v1.p.rapidapi.com/v3/fixtures/lineups?fixture=" + fixtureId;
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(lineupsUrl, HttpMethod.GET, entity, String.class);
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            List<Lineup> lineups = new ArrayList<>();
+
+            if (rootNode != null && rootNode.has("response")) {
+                JsonNode responseNode = rootNode.get("response");
+
+                for (JsonNode lineupNode : responseNode) {
+                    JsonNode teamNode = lineupNode.get("team");
+                    String teamName = teamNode.has("name") ? teamNode.get("name").asText() : "";
+                    String teamLogoUrl = teamNode.has("logo") ? teamNode.get("logo").asText() : "";
+
+                    JsonNode coachNode = lineupNode.get("coach");
+                    String coachName = coachNode.has("name") ? coachNode.get("name").asText() : "";
+                    
+                    String formation = lineupNode.has("formation") ? lineupNode.get("formation").asText() : "";
+                    
+                    // get starting 11 
+                    List<PlayerDTO> startXI = new ArrayList<>();
+                    JsonNode startXINode = lineupNode.get("startXI");
+                    if (startXINode != null && startXINode.isArray()) {
+                        for (JsonNode playerNode : startXINode) {
+                            JsonNode playerInfo = playerNode.get("player");
+                            String playerName = playerInfo.has("name") ? playerInfo.get("name").asText() : "";
+                            
+                            int playerNumber = playerInfo.has("number") ? playerInfo.get("number").asInt() : 0;
+
+                            PlayerDTO player = new PlayerDTO(playerName, playerNumber);
+                            startXI.add(player);
+                        }
+                    }
+                    
+                    // get substitutes
+                    List<PlayerDTO> substitutes = new ArrayList<>();
+                    JsonNode substitutesNode = lineupNode.get("substitutes");
+                    if (substitutesNode != null && substitutesNode.isArray()) {
+                        for (JsonNode playerNode : substitutesNode) {
+                            JsonNode playerInfo = playerNode.get("player");
+                            String playerName = playerInfo.has("name") ? playerInfo.get("name").asText() : "";
+                            int playerNumber = playerInfo.has("number") ? playerInfo.get("number").asInt() : 0;
+                       
+                            PlayerDTO player = new PlayerDTO( playerName, playerNumber);
+                            substitutes.add(player);
+                        }
+                    }
+                    
+                    Lineup lineup = new Lineup( teamName, teamLogoUrl, coachName, formation, startXI, substitutes);
+                    lineups.add(lineup);
+                }
+            }
+
+            return lineups;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return Collections.emptyList();
+        }
+    }
+
+    //get events for fixture, match dashboard functionality
+    public List<Event> getEventsForFixture(int fixtureId) {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-rapidapi-key", "1c50bcaccdmsh24da0059f6cea8ap10c332jsn3680464f84d3");
+        headers.set("x-rapidapi-host", "api-football-v1.p.rapidapi.com");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        String eventsUrl = "https://api-football-v1.p.rapidapi.com/v3/fixtures/events?fixture=" + fixtureId;
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(eventsUrl, HttpMethod.GET, entity, String.class);
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            List<Event> events = new ArrayList<>();
+
+            if (rootNode != null && rootNode.has("response")) {
+                JsonNode eventsNode = rootNode.get("response");
+
+                for (JsonNode eventNode : eventsNode) {
+                    int timeElapsed = eventNode.get("time").get("elapsed").asInt();
+                    int timeExtra = eventNode.get("time").get("extra").asInt();
+                    
+                    if (eventNode.get("time").get("extra").isNull()) {
+                        timeExtra = 0;
+                    }
+                    int time = timeElapsed + timeExtra;
+                    String teamName = eventNode.get("team").get("name").asText();
+                    String teamLogo = eventNode.get("team").get("logo").asText();
+                    String player = eventNode.get("player").get("name").asText();
+                    String assist = eventNode.has("assist") ? eventNode.get("assist").get("name").asText() : "";
+                    String type = eventNode.get("type").asText();
+                    String detail = eventNode.get("detail").asText();
+                    String comments = eventNode.has("comments") ? eventNode.get("comments").asText() : "";
+                    
+                    if(assist.equals("null")) {
+                    	assist = "";
+                    }
+                    if (comments.equals("null")) {
+                    	comments = "";
+                    }
+
+                    Event event = new Event(time, teamName, teamLogo, player, assist, type, detail, comments);
+                    events.add(event);
+                                        
+                }
+            }
+
+            return events;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return Collections.emptyList();
+        }
+    }
+    
+    //**//
+	
+    //**CODE TO GET FIXTURES IDS FOR REFEREES AND USE THESE IDS TO GET MATCH EVENTS**//
+    public List<Integer> getFixtureIdsByReferee(String refereeName){
+    	List<Integer> fixtureIds = new ArrayList<>();
+    	RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-rapidapi-key", "1c50bcaccdmsh24da0059f6cea8ap10c332jsn3680464f84d3");
+        headers.set("x-rapidapi-host", "api-football-v1.p.rapidapi.com");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+        
+        String fixturesUrl = "https://api-football-v1.p.rapidapi.com/v3/fixtures?league=39&season=2024";
+        //Save referee if they dont exist
+        RefereeAnalysis referee = refereeAnalysisRepository.findByName(refereeName);
+        if (referee == null) {
+            referee = new RefereeAnalysis();
+            referee.setName(refereeName);
+        }
+        refereeAnalysisRepository.save(referee);
+        
+        
+        System.out.println("attempting to get fixture ids for referee:" + refereeName);
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(fixturesUrl, HttpMethod.GET, entity, String.class);
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+
+            if (rootNode != null && rootNode.has("response")) {
+                JsonNode fixturesNode = rootNode.get("response");
+
+                if (fixturesNode != null && fixturesNode.isArray()) {
+                    for (JsonNode fixtureNode : fixturesNode) {
+                        JsonNode refereeNode = fixtureNode.get("fixture").get("referee");
+                        if (refereeNode != null) {
+                            String fixtureReferee = refereeNode.asText();
+                            //String[] refereeParts = fixtureReferee.split(",");
+                            //String refereeNameFromFixture = refereeParts[0].trim();
+                            System.out.println("referee from api:" + fixtureReferee);
+                            
+                            String[] refereeParam = refereeName.split(" ");
+                            String convertedRefereeName = refereeParam[0].charAt(0) + ". " + refereeParam[1];
+                            System.out.println("Converted name" + convertedRefereeName);
+                            
+                            //Add fixture ids for referee to array
+                            if (convertedRefereeName.equalsIgnoreCase(fixtureReferee)) {
+                                fixtureIds.add(fixtureNode.get("fixture").get("id").asInt());
+                                System.out.println("Added fixture id");
+                                
+                                //For any matches a referee has been involved in, save the fixture in the database 
+                                MatchAnalysis match = matchAnalysisRepository.findByFixtureId(fixtureNode.get("fixture").get("id").asInt());
+                                if (match == null) {
+                                
+	                                MatchAnalysis Match = new MatchAnalysis();
+	                                Match.setFixtureId(fixtureNode.get("fixture").get("id").asInt());    
+	                                Match.setHomeTeam(fixtureNode.get("teams").get("home").get("name").asText());
+	                                Match.setAwayTeam(fixtureNode.get("teams").get("away").get("name").asText());
+	                                Match.setRefereeName(refereeName);
+	                                
+	                                matchAnalysisRepository.save(Match);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return fixtureIds;
+    }
+    
+    //get events for fixtureid list based on each referee
+    public List<Event> getEventsForFixtures(List<Integer> fixtureIds) {
+        List<Event> allEvents = new ArrayList<>();
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-rapidapi-key", "1c50bcaccdmsh24da0059f6cea8ap10c332jsn3680464f84d3");
+        headers.set("x-rapidapi-host", "api-football-v1.p.rapidapi.com");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        for (Integer fixtureId : fixtureIds) {
+            String eventsUrl = "https://api-football-v1.p.rapidapi.com/v3/fixtures/events?fixture=" + fixtureId;
+
+            try {
+                ResponseEntity<String> response = restTemplate.exchange(eventsUrl, HttpMethod.GET, entity,
+                        String.class);
+                ObjectMapper objectMapper = new ObjectMapper();
+                JsonNode rootNode = objectMapper.readTree(response.getBody());
+
+                if (rootNode != null && rootNode.has("response")) {
+                    JsonNode eventsNode = rootNode.get("response");
+
+                    for (JsonNode eventNode : eventsNode) {
+                        String type = eventNode.get("type").asText();
+                        if (type.equals("Goal") || type.equals("Card") || type.equals("Var")) {
+                            int timeElapsed = eventNode.get("time").get("elapsed").asInt();
+                            int timeExtra = eventNode.get("time").get("extra").isNull() ? 0
+                                    : eventNode.get("time").get("extra").asInt();
+                            int time = timeElapsed + timeExtra;
+                            String teamName = eventNode.get("team").get("name").asText();
+                            String teamLogo = eventNode.get("team").get("logo").asText();
+                            String player = eventNode.get("player").get("name").asText();
+                            String assist = eventNode.has("assist") ? eventNode.get("assist").get("name").asText()
+                                    : "";
+                            String detail = eventNode.get("detail").asText();
+                            String comments = eventNode.has("comments") ? eventNode.get("comments").asText() : "";
+
+                            if (assist.equals("null")) {
+                                assist = "";
+                            }
+                            if (comments.equals("null")) {
+                                comments = "";
+                            }
+
+                            Event event = new Event(time, teamName, teamLogo, player, assist, type, detail,
+                                    comments);
+                            allEvents.add(event);
+                            
+                            MatchEvent matchEvent = matchEventRepository.findByTeamNameAndTimeAndPlayerNameAndAssistAndTypeAndDetailAndComments(teamName, time, player, assist, type, detail, comments);
+                            
+                            if (matchEvent == null) {
+                            	MatchEvent matchevents = new MatchEvent();
+                            	matchevents.setMatchId(fixtureId);
+                            	matchevents.setTeamName(teamName);
+                            	matchevents.setType(type);
+                            	matchevents.setTime(time);
+                            	matchevents.setTeamLogo(teamLogo);
+                            	matchevents.setPlayerName(player);                    
+                            	matchevents.setDetail(detail);
+                            	matchevents.setAssist(assist);
+                            	matchevents.setComments(comments);
+                            	
+                            	matchEventRepository.save(matchevents);
+                            } 
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        return allEvents;
+    }
+    
+    //***//
+
+    public int getFixtureIdByTeams(String homeTeam, String awayTeam) {
+    	RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-rapidapi-key", "1c50bcaccdmsh24da0059f6cea8ap10c332jsn3680464f84d3");
+        headers.set("x-rapidapi-host", "api-football-v1.p.rapidapi.com");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        String fixturesUrl = "https://api-football-v1.p.rapidapi.com/v3/fixtures?league=39&season=2023";
+
+        try {
+        	ResponseEntity<String> response = restTemplate.exchange(fixturesUrl, HttpMethod.GET, entity, String.class);
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+
+            if (rootNode != null && rootNode.has("response")) {
+            	JsonNode fixturesNode = rootNode.get("response");
+
+                if (fixturesNode != null && fixturesNode.isArray()) {
+                	for (JsonNode fixtureNode : fixturesNode) {
+                		JsonNode teamsNode = fixtureNode.get("teams");
+                        if (teamsNode != null) {
+                        	JsonNode homeNode = teamsNode.get("home");
+                            JsonNode awayNode = teamsNode.get("away");
+                            if (homeNode != null && awayNode != null) {
+                            	String homeTeamName = homeNode.get("name").asText();
+                                String awayTeamName = awayNode.get("name").asText();
+                                if (homeTeam.equals(homeTeamName) && awayTeam.equals(awayTeamName)) {
+                                	return fixtureNode.get("fixture").get("id").asInt();
+                                }
+                            }
+                         }
+                     }
+                 }
+               }
+        } catch (IOException e) {
+        	e.printStackTrace();
+     }
+
+     return -1; 
+        
+    	
+   }
+    
+    
+    
+    public List<Match> getMatchesByMatchday(int matchday) {
+		 RestTemplate restTemplate = new RestTemplate();
+
+	     HttpHeaders headers = new HttpHeaders();
+	     headers.set("X-Auth-Token", "f808a517d42a4447931a952b7a9ec4ae"); 
+	       
+	     HttpEntity<String> entity = new HttpEntity<>(headers);
+
+	     String matchesUrl = "https://api.football-data.org/v4/competitions/PL/matches";
+	     ResponseEntity<String> response = restTemplate.exchange(matchesUrl, HttpMethod.GET, entity, String.class);
+	     List<Match> matches = new ArrayList<>();
+	     try {
+	    	    ObjectMapper objectMapper = new ObjectMapper();
+	    	    JsonNode rootNode = objectMapper.readTree(response.getBody());
+	    	    JsonNode matchesNode = rootNode.get("matches");
+	    	    if (matchesNode != null && matchesNode.isArray()) {
+	    	        for (JsonNode matchNode : matchesNode) {
+	    	            int matchMatchday = matchNode.get("matchday").asInt();
+	    	            if (matchMatchday == matchday) {
+	    	                Match match = new Match();
+	    	                //separate date and time into separate fields
+	    	                match.setMatchDate(matchNode.get("utcDate").asText().substring(0, 10)); 
+	    	                match.setMatchTime(matchNode.get("utcDate").asText().substring(11, 16));
+	    	                match.setStatus(matchNode.get("status").asText());
+	    	                match.setMatchID(matchNode.get("id").asInt());
+	    	                match.setHomeTeamShortName(matchNode.get("homeTeam").get("shortName").asText());
+	    	                match.setHomeTeamCrest(matchNode.get("homeTeam").get("crest").asText());
+	    	                match.setAwayTeamShortName(matchNode.get("awayTeam").get("shortName").asText());
+	    	                match.setAwayTeamCrest(matchNode.get("awayTeam").get("crest").asText());
+	    	                //filter what is set based on whether the match is a fixture or result. 
+	    	                if("TIMED".equals(match.getStatus())) {
+	    	                    match.setHomeTeamScore(-1);
+	    	                    match.setAwayTeamScore(-1);
+	    	                    match.setRefereeName("Not Assigned");
+	    	                } else {
+	    	                    match.setHomeTeamScore(matchNode.get("score").get("fullTime").get("home").asInt());
+	    	                    match.setAwayTeamScore(matchNode.get("score").get("fullTime").get("away").asInt());
+	    	                    JsonNode refereesNode = matchNode.get("referees");
+	    	                    if (refereesNode != null) {
+	    	                        if (refereesNode.isArray() && refereesNode.size() > 0) {
+	    	                            String refereeName = refereesNode.get(0).get("name").asText();
+	    	                            match.setRefereeName(refereeName);
+	    	                        } else {
+	    	                            match.setRefereeName("Not Assigned");
+	    	                        }
+	    	                    } else {
+	    	                        System.out.println("Referees node is null or not present");
+	    	                        match.setRefereeName("Not Assigned");
+	    	                    }
+	    	                }         
+	    	                matches.add(match);
+	    	            }
+	    	        }
+	    	    } else {
+	    	        System.out.println("Matches node is null or not present");
+	    	    }
+	    	    
+	    	    return matches;
+	    	    
+	    	} catch(IOException e) {
+	    	    e.printStackTrace();
+	    	    return Collections.emptyList();
+	    	}
+
+	
+	}
+    
+    public int getCurrentMatchday() {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Auth-Token", "f808a517d42a4447931a952b7a9ec4ae"); 
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+        String matchesUrl = "https://api.football-data.org/v4/competitions/PL/matches";
+        
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(matchesUrl, HttpMethod.GET, entity, String.class);
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            
+            if (rootNode != null && rootNode.has("matches")) {
+                JsonNode matchesNode = rootNode.get("matches");
+                
+                if (matchesNode != null && matchesNode.isArray() && matchesNode.size() > 0) {
+                    JsonNode firstMatch = matchesNode.get(0);
+                    JsonNode seasonNode = firstMatch.get("season");
+                    
+                    if (seasonNode != null && seasonNode.has("currentMatchday")) {
+                        int currentMatchday = seasonNode.get("currentMatchday").asInt();
+                        return currentMatchday;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace(); 
+        }
+                
+        return 0;
+    }
+    
+    public List<Match> getMatchesForCurrentMatchday() {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Auth-Token", "f808a517d42a4447931a952b7a9ec4ae"); 
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+        String matchesUrl = "https://api.football-data.org/v4/competitions/PL/matches";
+        
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(matchesUrl, HttpMethod.GET, entity, String.class);
+            List<Match> matches = new ArrayList<>();
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            
+            if (rootNode != null && rootNode.has("season") && rootNode.get("season").has("currentMatchday")) {
+                int currentMatchday = getCurrentMatchday();
+                System.out.println(currentMatchday);
+                JsonNode matchesNode = rootNode.get("matches");
+                
+                if (matchesNode != null && matchesNode.isArray()) {
+                    for (JsonNode matchNode : matchesNode) {
+                        int matchMatchday = matchNode.get("matchday").asInt();
+                        
+                        if (matchMatchday == currentMatchday) {
+                            Match match = new Match();
+                            //separate date and time into separate fields
+                            match.setMatchDate(matchNode.get("utcDate").asText().substring(0, 10)); 
+                            match.setMatchTime(matchNode.get("utcDate").asText().substring(11, 16));
+                            match.setStatus(matchNode.get("status").asText());
+                            match.setMatchID(matchNode.get("id").asInt());
+                            match.setHomeTeamShortName(matchNode.get("homeTeam").get("shortName").asText());
+                            match.setHomeTeamCrest(matchNode.get("homeTeam").get("crest").asText());
+                            match.setAwayTeamShortName(matchNode.get("awayTeam").get("shortName").asText());
+                            match.setAwayTeamCrest(matchNode.get("awayTeam").get("crest").asText());
+                            
+                            //filter what is set based on whether the match is a fixture or result. 
+                            if("TIMED".equals(match.getStatus())) {
+                                match.setHomeTeamScore(-1);
+                                match.setAwayTeamScore(-1);
+                                match.setRefereeName("Not Assigned");
+                            } else {
+                                match.setHomeTeamScore(matchNode.get("score").get("fullTime").get("home").asInt());
+                                match.setAwayTeamScore(matchNode.get("score").get("fullTime").get("away").asInt());
+                                JsonNode refereesNode = matchNode.get("referees");
+                                
+                                if (refereesNode != null) {
+                                    if (refereesNode.isArray() && refereesNode.size() > 0) {
+                                        String refereeName = refereesNode.get(0).get("name").asText();
+                                        match.setRefereeName(refereeName);
+                                    } else {
+                                        match.setRefereeName("Not Assigned");
+                                    }
+                                } else {
+                                    System.out.println("Referees node is null or not present");
+                                    match.setRefereeName("Not Assigned");
+                                }
+                            }         
+                            matches.add(match);
+                        }
+                    }
+                } else {
+                    System.out.println("Matches node is null or not present");
+                }
+            } else {
+                System.out.println("Root node or currentMatchday property is null or not present");
+            }
+            
+            return matches;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return Collections.emptyList();
+        }
+    }
+    
+    public int getNumberOfMatchweeks() {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Auth-Token", "f808a517d42a4447931a952b7a9ec4ae");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        String matchesUrl = "https://api.football-data.org/v4/competitions/PL/matches";
+        ResponseEntity<String> response = restTemplate.exchange(matchesUrl, HttpMethod.GET, entity, String.class);
+
+        int numberOfMatchweeks = 0;
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            JsonNode matchesNode = rootNode.get("matches");
+
+            Set<Integer> matchweeks = new HashSet<>();
+            for (JsonNode matchNode : matchesNode) {
+                String status = matchNode.get("status").asText();
+                if ("FINISHED".equals(status)) {
+                    int matchMatchday = matchNode.get("matchday").asInt();
+                    matchweeks.add(matchMatchday);
+                }
+            }
+
+            numberOfMatchweeks = matchweeks.size();
+
+        } catch(IOException e) {
+            e.printStackTrace();
+        }
+
+        return numberOfMatchweeks;
+    }
+    
+    public int getNumberOfFixtures() {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Auth-Token", "f808a517d42a4447931a952b7a9ec4ae");
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        String matchesUrl = "https://api.football-data.org/v4/competitions/PL/matches";
+        ResponseEntity<String> response = restTemplate.exchange(matchesUrl, HttpMethod.GET, entity, String.class);
+
+        int numberOfMatchweeks = 0;
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            JsonNode matchesNode = rootNode.get("matches");
+
+            Set<Integer> matchweeks = new HashSet<>();
+            for (JsonNode matchNode : matchesNode) {
+                String status = matchNode.get("status").asText();
+                if ("TIMED".equals(status)) {
+                    int matchMatchday = matchNode.get("matchday").asInt();
+                    matchweeks.add(matchMatchday);
+                }
+            }
+
+            numberOfMatchweeks = matchweeks.size();
+            System.out.println("Number of Fixtures: " + numberOfMatchweeks);
+        } catch(IOException e) {
+            e.printStackTrace();
+        }
+
+        return numberOfMatchweeks;
+    }
+    
+     
+
+}

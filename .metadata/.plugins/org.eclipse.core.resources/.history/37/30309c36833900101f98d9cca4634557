@@ -1,0 +1,109 @@
+package com.example.premierleagueapp.controller;
+
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import com.example.premierleagueapp.model.Event;
+import com.example.premierleagueapp.model.FixtureStats;
+import com.example.premierleagueapp.model.Lineup;
+import com.example.premierleagueapp.model.Match;
+import com.example.premierleagueapp.model.Result;
+import com.example.premierleagueapp.service.ResultService;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/results")
+public class ResultController {
+
+    private final ResultService resultService;
+
+    public ResultController(ResultService resultService) {
+        this.resultService = resultService;
+    }   
+
+    //endpoint to get events for a fixture given the names of teams
+    @GetMapping("/getFixtureId/{homeTeam}/{awayTeam}")
+    public ResponseEntity<Integer> getEventsForFixture(@PathVariable String homeTeam, @PathVariable String awayTeam) {
+    	System.out.println("recieved get fixture id by teams call from front end");
+        int fixtureId = resultService.getFixtureIdByTeams(homeTeam, awayTeam);
+        System.out.println("called getfixturebyid method in result service file");
+        if(fixtureId != -1) {     	
+        	return ResponseEntity.ok(fixtureId);
+        }else {
+        	return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+    }
+    
+    //endpoint to get events based on fixture id
+    @GetMapping("getEventsForFixture/{fixtureId}")
+    public ResponseEntity<List<Event>> getEventsForFixture(@PathVariable int fixtureId){
+    	List<Event> events = resultService.getEventsForFixture(fixtureId); 
+    	
+    	if(!events.isEmpty()) { 
+    		return ResponseEntity.ok(events); 
+    	} else {
+    		return ResponseEntity.noContent().build();
+    	} 
+    } 		   			  
+    
+    //endpoint to get the lineups for a match
+    @GetMapping("getLineupsForFixture/{fixtureId}")
+    public ResponseEntity<List<Lineup>> getLineupsForFixture(@PathVariable int fixtureId){
+    	List<Lineup> lineups = resultService.getLineupsForFixture(fixtureId);
+    	if(!lineups.isEmpty()) {
+    		return ResponseEntity.ok(lineups);
+    	} else {
+    		return ResponseEntity.noContent().build();
+    	}
+    }
+	
+    //endpoint to get stats for fixture
+    @GetMapping("getStatsForFixture/{fixtureId}")
+    public ResponseEntity<List<FixtureStats>> getStatsForFixture(@PathVariable int fixtureId){
+    	List<FixtureStats> stats = resultService.getStatsForFixture(fixtureId);
+    	if(!stats.isEmpty()) {
+    		return ResponseEntity.ok(stats);
+    	} else {
+    		return ResponseEntity.noContent().build();
+    	}
+    }
+	  
+    
+    //endpoint to retrieve all results of a weekend by a matchdayID
+    //USED TO GET MATCHES IN THE MATCHES DROPDOWN
+    @GetMapping("/{matchday}")
+    public List<Match> getMatchesByMatchday(@PathVariable int matchday) {
+    	return resultService.getMatchesByMatchday(matchday);
+    }
+    
+  //endpoint to retrieve all results of a weekend for the current matchweek
+    @GetMapping("/getCurrentWeekMatches")
+    public List<Match> getMatchesForCurrentMatchday() {
+    	return resultService.getMatchesForCurrentMatchday();
+    }
+           
+    
+    @GetMapping("/number-of-matchweeks")
+    public ResponseEntity<Integer> getNumberOfMatchweeks(){
+    	int matchweeks = resultService.getNumberOfMatchweeks();
+    	return new ResponseEntity<>(matchweeks, HttpStatus.OK);
+    }
+    
+    @GetMapping("/number-of-fixtures")
+    public ResponseEntity<Integer> getNumberOfFixtures(){
+    	int fixtures = resultService.getNumberOfFixtures();
+    	return new ResponseEntity<>(fixtures, HttpStatus.OK);
+    }
+           
+    
+   //endpoint to return the current matchweek
+    @GetMapping("/getCurrentMatchweek")
+    public int getCurrentMatchweek() {
+    	Integer currentMatchday = resultService.getCurrentMatchday();
+    	return currentMatchday;
+    }
+
+}
